@@ -25,7 +25,11 @@ SECRET_KEY = 'django-insecure-ns-5-yofze^11wrh0k+b8-lcay)x@ph^)5x1&_^)q3qgwr9(b8
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "spiro-ecommerce.onrender.com"
+]
 import os
 from pathlib import Path
 from dotenv import load_dotenv
