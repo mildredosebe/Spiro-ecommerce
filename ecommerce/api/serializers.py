@@ -52,3 +52,14 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class STKPushSerializer(serializers.Serializer):
     order_id = serializers.UUIDField()
     phone_number = serializers.CharField(max_length=15)
+
+class STKPushCallbackSerializer(serializers.Serializer):
+    MerchantRequestID = serializers.CharField(max_length=100)
+    CheckoutRequestID = serializers.CharField(max_length=100)
+    ResultCode = serializers.IntegerField()
+    ResultDesc = serializers.CharField(max_length=255)
+    Amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    MpesaReceiptNumber = serializers.CharField(max_length=100, required=False, allow_null=True, allow_blank=True)
+    Balance = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    TransactionDate = serializers.DateTimeField(required=False, allow_null=True)
+    PhoneNumber = serializers.CharField(max_length=15, required=False, allow_null=True, allow_blank=True)

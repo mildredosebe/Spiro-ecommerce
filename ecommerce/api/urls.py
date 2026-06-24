@@ -31,14 +31,9 @@ router.register(r'payments', PaymentViewSet, basename='payment')
 urlpatterns = [
 
     path('payments/stk-push/', STKPushView.as_view(), name='stk_push'),
-    path('', include(router.urls)),
-    
-    path('orders/create/', OrderCreateView.as_view(), name='order_create'),
-    
-    
-    
     path('payments/callback/', MpesaCallbackView.as_view(), name='mpesa_callback'),
-    
+    path('', include(router.urls)),
+    path('orders/create/', OrderCreateView.as_view(), name='order_create'),
     path('docs/', scalar_docs, name='api_docs'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     

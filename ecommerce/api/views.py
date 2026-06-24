@@ -29,6 +29,8 @@ from api.serializers import PaymentSerializer
 from api.serializers import STKPushSerializer
 from drf_spectacular.utils import extend_schema
 
+from api.serializers import STKPushCallbackSerializer
+
 from payment.service.mpesa import stk_push
 from django.utils import timezone
 from django.http import HttpResponse
@@ -186,9 +188,7 @@ class STKPushView(APIView):
             )
 
         try:
-            # Get the automatically created payment
             payment = Payment.objects.filter(order=order).order_by("-id").first()
-
             # Update payment with phone number
             payment.phone_number = phone_number
             payment.save(update_fields=["phone_number"])
@@ -200,7 +200,7 @@ class STKPushView(APIView):
             logger.info(f"Initiating STK push for order {order_id} to {phone_number}")
 
             # Call M-Pesa STK push
-            callback_url = "https://apelisoltech.com/api/payments/callback/"
+            callback_url = "https://spiro-ecommerce.onrender.com/api/payments/callback/"
 
             try:
                 mpesa_response = stk_push(
@@ -208,7 +208,8 @@ class STKPushView(APIView):
                     amount=order.total_amount,
                     account_reference=str(order.order_id),
                     transaction_desc="Spiro Bike Order",
-                    callback_url=callback_url
+                    callback_url=callback_url,
+                    payment=payment
                 )
 
                 logger.info(f"M-Pesa response: {mpesa_response}")
@@ -291,27 +292,59 @@ class MpesaCallbackView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        request=STKPushCallbackSerializer,
+        responses={200: dict}
+    )
+
     def post(self, request):
         logger.info(f"M-Pesa callback received: {request.data}")
 
-        try:
-            callback = request.data["Body"]["stkCallback"]
-            checkout_id = callback["CheckoutRequestID"]
-            result_code = callback["ResultCode"]
+        data = request.data
 
-        except KeyError as e:
-            logger.error(f"Invalid callback format: {str(e)}")
+        try:
+            # CASE 1: Safaricom standard format
+            if "Body" in data:
+                callback = data["Body"]["stkCallback"]
+                checkout_id = callback["CheckoutRequestID"]
+                result_code = callback["ResultCode"]
+                result_desc = callback.get("ResultDesc", "")
+                metadata_items = callback.get("CallbackMetadata", {}).get("Item", [])
+
+                receipt_number = None
+                for item in metadata_items:
+                    if item.get("Name") == "MpesaReceiptNumber":
+                        receipt_number = item.get("Value")
+
+            # CASE 2: Your flattened format (what you're receiving)
+            else:
+                checkout_id = data.get("CheckoutRequestID")
+                result_code = data.get("ResultCode")
+                result_desc = data.get("ResultDesc", "")
+                receipt_number = data.get("MpesaReceiptNumber")
+
+            if not checkout_id:
+                return Response(
+                    {"error": "Missing CheckoutRequestID"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            logger.error(f"Callback parse error: {str(e)}")
             return Response(
                 {"error": "Invalid callback format"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # ------------------------------------------------------------------
+        # Continue normal processing
+        # ------------------------------------------------------------------
 
         try:
             payment = Payment.objects.get(
                 mpesa_checkout_request_id=checkout_id
             )
         except Payment.DoesNotExist:
-            logger.error(f"Payment not found for checkout_id: {checkout_id}")
             return Response(
                 {"error": "Payment not found"},
                 status=status.HTTP_404_NOT_FOUND
@@ -319,54 +352,23 @@ class MpesaCallbackView(APIView):
 
         order = payment.order
 
-        if result_code == 0:
-            # Payment successful
-            logger.info(f"Payment successful for order {order.order_id}")
-
-            receipt_number = None
-
-            metadata = callback.get("CallbackMetadata", {}).get("Item", [])
-
-            for item in metadata:
-                if item.get("Name") == "MpesaReceiptNumber":
-                    receipt_number = item.get("Value")
-                    break
-
-            # Update payment using helper method
+        if str(result_code) == "0":
             payment.mark_as_paid(receipt_number=receipt_number)
 
-            # Update order
             order.payment_status = "paid"
             order.order_status = "processing"
             order.mpesa_receipt_number = receipt_number
             order.paid_at = timezone.now()
             order.transaction_date = timezone.now()
-            order.save(update_fields=[
-                "payment_status",
-                "order_status",
-                "mpesa_receipt_number",
-                "paid_at",
-                "transaction_date"
-            ])
-
-            logger.info(f"Order {order.order_id} marked as paid with receipt {receipt_number}")
+            order.save()
 
         else:
-            # Payment failed
-            result_desc = callback.get("ResultDesc", "Unknown error")
-            logger.warning(f"Payment failed for order {order.order_id}: {result_desc}")
-
             payment.mark_as_failed(error_message=result_desc)
 
             order.payment_status = "failed"
-            order.save(update_fields=["payment_status"])
+            order.save()
 
-            logger.warning(f"Order {order.order_id} marked as failed")
-
-        return Response({
-            "ResultCode": 0,
-            "ResultDesc": "Accepted"
-        })
+        return Response({"ResultCode": 0, "ResultDesc": "We have received the callback"}, status=status.HTTP_200_OK)
 
 
 # ============================================================================
