@@ -32,9 +32,7 @@ from api.serializers import OrderItemSerializer
 from payment.models import Payment
 from api.serializers import PaymentSerializer, STKPushSerializer, STKPushCallbackSerializer
 from payment.service.mpesa import stk_push
-from rest_framework.viewsets import ModelViewSet
-from .models import Cart
-from .serializers import CartSerializer
+
 logger = logging.getLogger(__name__)
 
 
@@ -428,15 +426,11 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
-class CartViewSet(ModelViewSet):
+
+class CartViewSet(viewsets.ModelViewSet):
+    queryset = Cart.objects.all()
     serializer_class = CartSerializer
-    permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        return Cart.objects.filter(user=self.request.user)
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
 
 class CartItemViewSet(viewsets.ModelViewSet):
     queryset = CartItem.objects.all()
