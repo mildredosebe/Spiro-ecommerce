@@ -465,7 +465,7 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 🔥 IMPORTANT: authenticate() uses username internally
+      
         user = authenticate(request, username=email, password=password)
 
         # fallback if backend doesn't map email properly

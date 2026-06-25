@@ -86,10 +86,7 @@ class Order(models.Model):
         null=True
     )
 
-    # ---------------------------
-    # ORDER TRACKING
-    # ---------------------------
-
+   
     tracking_number = models.CharField(
         max_length=100,
         blank=True,
@@ -101,9 +98,6 @@ class Order(models.Model):
         null=True
     )
 
-    # ---------------------------
-    # TIMESTAMPS
-    # ---------------------------
 
     created_at = models.DateTimeField(
         auto_now_add=True

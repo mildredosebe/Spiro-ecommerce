@@ -21,8 +21,6 @@ from api.views import (
 )
 
 
-
-# DRF Router for ViewSets
 router = DefaultRouter()
 router.register(r'vehicles', VehicleViewSet, basename='vehicle')
 router.register(r'users', UserViewSet, basename='user')

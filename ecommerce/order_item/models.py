@@ -1,12 +1,10 @@
 from django.db import models
 
-# Create your models here.
 import uuid
 from django.db import models
- # adjust if your app name differs
-from vehicle.models import Vehicle  # adjust if your app name differs
+from vehicle.models import Vehicle  
 from django.core.validators import MinValueValidator
-from order.models import Order  # adjust if your app name differs
+from order.models import Order 
 class OrderItem(models.Model):
     id = models.UUIDField(
         primary_key=True,
