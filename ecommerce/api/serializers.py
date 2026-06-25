@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from vehicle.models import Vehicle
-from django.contrib.auth.models import User
 from user.models import User
 from cart.models import Cart
 from cart_item.models import CartItem
@@ -37,10 +36,11 @@ class CartSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cart
         fields = '__all__'
-class CartItemSerializer(serializers.ModelSerializer):
+class CartSerializer(serializers.ModelSerializer):
     class Meta:
-        model = CartItem
+        model = Cart
         fields = '__all__'
+        read_only_fields = ('user', 'cart_id')
 class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
