@@ -34,8 +34,11 @@ router.register(r'payments', PaymentViewSet, basename='payment')
 
 
 
-urlpatterns = [
 
+from django.urls import path, include
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+urlpatterns = [
     path('payments/stk-push/', STKPushView.as_view(), name='stk_push'),
     path('payments/callback/', MpesaCallbackView.as_view(), name='mpesa_callback'),
     path('', include(router.urls)),
@@ -43,8 +46,10 @@ urlpatterns = [
     path('docs/', scalar_docs, name='api_docs'),
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
-    path("token/", obtain_auth_token),
+
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
     path("login/", LoginView.as_view(), name="login"),
     path("register/", RegisterView.as_view(), name="register"),
-
 ]
