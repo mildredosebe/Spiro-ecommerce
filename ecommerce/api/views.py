@@ -455,6 +455,11 @@ from user.models import User
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=LoginSerializer,
+        responses={200: dict}
+    )
+
     def post(self, request):
         email = request.data.get("email")
         password = request.data.get("password")
