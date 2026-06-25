@@ -10,13 +10,10 @@ from api.serializers import VehicleSerializer
 
 from user.models import User
 from api.serializers import UserSerializer
-
 from cart.models import Cart
 from api.serializers import CartSerializer
-
 from cart_item.models import CartItem
 from api.serializers import CartItemSerializer
-
 from order.models import Order
 from api.serializers import OrderSerializer
 
@@ -34,9 +31,24 @@ from api.serializers import STKPushCallbackSerializer
 from payment.service.mpesa import stk_push
 from django.utils import timezone
 from django.http import HttpResponse
+from rest_framework_simplejwt.views import TokenObtainPairView
+from .serializers import LoginSerializer
 import logging
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
 
-# Setup logger
+
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from user.models import User
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +57,7 @@ class OrderCreateView(APIView):
     Create an order. A Payment record will be automatically created via signal.
     Authentication is optional for now (testing).
     """
-    permission_classes = [AllowAny]  # TODO: Change to [IsAuthenticated] in production
+    permission_classes = [AllowAny]  
 
     def post(self, request):
         """
@@ -143,9 +155,7 @@ class OrderCreateView(APIView):
             )
 
 
-# ============================================================================
-# STK PUSH VIEW - INITIATES M-PESA PAYMENT
-# ============================================================================
+
 
 class STKPushView(APIView):
     """
@@ -189,11 +199,8 @@ class STKPushView(APIView):
 
         try:
             payment = Payment.objects.filter(order=order).order_by("-id").first()
-            # Update payment with phone number
             payment.phone_number = phone_number
             payment.save(update_fields=["phone_number"])
-
-            # Update order with phone number
             order.phone_number = phone_number
             order.save(update_fields=["phone_number"])
 
@@ -280,9 +287,7 @@ class STKPushView(APIView):
             )
 
 
-# ============================================================================
-# M-PESA CALLBACK VIEW
-# ============================================================================
+
 
 class MpesaCallbackView(APIView):
     """
@@ -336,9 +341,7 @@ class MpesaCallbackView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ------------------------------------------------------------------
-        # Continue normal processing
-        # ------------------------------------------------------------------
+
 
         try:
             payment = Payment.objects.get(
@@ -371,9 +374,7 @@ class MpesaCallbackView(APIView):
         return Response({"ResultCode": 0, "ResultDesc": "We have received the callback"}, status=status.HTTP_200_OK)
 
 
-# ============================================================================
-# VIEWSETS
-# ============================================================================
+
 
 class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.all()
@@ -408,6 +409,8 @@ class OrderItemViewSet(viewsets.ModelViewSet):
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
+class LoginView(TokenObtainPairView):
+    serializer_class = LoginSerializer
 
 
 # ============================================================================
@@ -433,3 +436,77 @@ def scalar_docs(request):
     </html>
     """
     return HttpResponse(html)
+from rest_framework_simplejwt.views import TokenObtainPairView
+from .serializers import LoginSerializer
+
+
+
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from user.models import User
+
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔥 IMPORTANT: authenticate() uses username internally
+        user = authenticate(request, username=email, password=password)
+
+        # fallback if backend doesn't map email properly
+        if user is None:
+            try:
+                user_obj = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
+            if not user_obj.check_password(password):
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
+            user = user_obj
+
+        if not user.is_active:
+            return Response(
+                {"error": "User account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+       
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "user_type": user.user_type,
+            }
+        })

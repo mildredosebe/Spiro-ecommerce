@@ -12,16 +12,16 @@ class UserManager(BaseUserManager):
 
     def create_user(self, email, password=None, **extra_fields):
         if not email:
-            raise ValueError("The email field is required")
+            raise ValueError("Email is required")
 
         email = self.normalize_email(email)
 
         extra_fields.setdefault("user_type", "customer")
+        extra_fields.setdefault("is_active", True)
 
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
-
         return user
 
     def create_superuser(self, email, password=None, **extra_fields):
@@ -31,10 +31,10 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("user_type", "admin")
 
         if extra_fields.get("is_staff") is not True:
-            raise ValueError("Superuser must have is_staff=True.")
+            raise ValueError("Superuser must have is_staff=True")
 
         if extra_fields.get("is_superuser") is not True:
-            raise ValueError("Superuser must have is_superuser=True.")
+            raise ValueError("Superuser must have is_superuser=True")
 
         return self.create_user(email, password, **extra_fields)
 
@@ -42,24 +42,13 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     username = None
 
-    email = models.EmailField(
-        unique=True,
-        verbose_name="email address",
-    )
+    email = models.EmailField(unique=True)
 
     full_name = models.CharField(max_length=255)
 
-    phone_number = models.CharField(
-        max_length=20,
-        blank=True,
-        null=True,
-    )
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
 
-    address = models.CharField(
-        max_length=512,
-        blank=True,
-        null=True,
-    )
+    address = models.CharField(max_length=512, blank=True, null=True)
 
     user_type = models.CharField(
         max_length=20,
@@ -73,4 +62,4 @@ class User(AbstractUser):
     objects = UserManager()
 
     def __str__(self):
-        return f"{self.full_name} ({self.get_user_type_display()})"
+        return f"{self.full_name} ({self.user_type})"

@@ -7,6 +7,7 @@ from cart_item.models import CartItem
 from order.models import Order
 from order_item.models import OrderItem
 from payment.models import Payment
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -63,3 +64,38 @@ class STKPushCallbackSerializer(serializers.Serializer):
     Balance = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     TransactionDate = serializers.DateTimeField(required=False, allow_null=True)
     PhoneNumber = serializers.CharField(max_length=15, required=False, allow_null=True, allow_blank=True)
+    from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth import authenticate
+from rest_framework import serializers
+
+
+class LoginSerializer(TokenObtainPairSerializer):
+    email = serializers.EmailField()
+
+    def validate(self, attrs):
+        email = attrs.get("email")
+        password = attrs.get("password")
+
+        user = authenticate(
+            request=self.context.get("request"),
+            username=email,
+            password=password
+        )
+
+        if not user:
+            raise serializers.ValidationError(
+                "Invalid email or password"
+            )
+
+        refresh = self.get_token(user)
+
+        return {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "user_type": user.user_type,
+            }
+        }
