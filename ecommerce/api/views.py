@@ -1,63 +1,123 @@
+"""
+Spiro API Views
+Handles order creation, M-Pesa STK push, callbacks, and user authentication.
+"""
+
+import logging
 from django.shortcuts import render
-from rest_framework import viewsets, status
+from django.http import HttpResponse
+from django.utils import timezone
+from django.contrib.auth import authenticate
+
+from rest_framework import viewsets, status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.decorators import action
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.tokens import RefreshToken
+from drf_spectacular.utils import extend_schema
 
 from vehicle.models import Vehicle
 from api.serializers import VehicleSerializer
-
 from user.models import User
-from api.serializers import UserSerializer
+from api.serializers import UserSerializer, LoginSerializer, RegisterSerializer
 from cart.models import Cart
 from api.serializers import CartSerializer
 from cart_item.models import CartItem
 from api.serializers import CartItemSerializer
 from order.models import Order
 from api.serializers import OrderSerializer
-
 from order_item.models import OrderItem
 from api.serializers import OrderItemSerializer
-
 from payment.models import Payment
-from api.serializers import PaymentSerializer
-
-from api.serializers import STKPushSerializer
-from drf_spectacular.utils import extend_schema
-
-from api.serializers import STKPushCallbackSerializer
-
+from api.serializers import PaymentSerializer, STKPushSerializer, STKPushCallbackSerializer
 from payment.service.mpesa import stk_push
-from django.utils import timezone
-from django.http import HttpResponse
-from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import LoginSerializer
-import logging
-from django.contrib.auth import authenticate
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
-
-
-from django.contrib.auth import authenticate
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
-from user.models import User
 
 logger = logging.getLogger(__name__)
 
 
+class LoginView(APIView):
+    """
+    User login with email and password.
+    Returns JWT access and refresh tokens.
+    """
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        request=LoginSerializer,
+        responses={200: dict}
+    )
+    def post(self, request):
+        """
+        Authenticate user and return tokens.
+        
+        Expected payload:
+        {
+            "email": "user@example.com",
+            "password": "password123"
+        }
+        """
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = authenticate(request, username=email, password=password)
+
+        if user is None:
+            try:
+                user = User.objects.get(email=email)
+                if not user.check_password(password):
+                    raise User.DoesNotExist
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "Invalid email or password"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
+        if not user.is_active:
+            return Response(
+                {"error": "User account is disabled"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "user_type": user.user_type,
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class RegisterView(generics.CreateAPIView):
+    """
+    User registration.
+    Creates a new user account.
+    """
+    queryset = User.objects.all()
+    serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
 class OrderCreateView(APIView):
     """
-    Create an order. A Payment record will be automatically created via signal.
-    Authentication is optional for now (testing).
+    Create a new order with items.
+    A Payment record is automatically created via Django signal.
     """
-    permission_classes = [AllowAny]  
+    permission_classes = [AllowAny]  # TODO: Change to [IsAuthenticated] in production
 
     def post(self, request):
         """
@@ -95,7 +155,6 @@ class OrderCreateView(APIView):
                 for item in items
             )
 
-            # Create order
             order = Order.objects.create(
                 user=user,
                 total_amount=total_amount,
@@ -106,7 +165,6 @@ class OrderCreateView(APIView):
 
             logger.info(f"Order created: {order.order_id} for user {user_id}")
 
-            # Create order items
             for item_data in items:
                 vehicle_id = item_data.get("vehicle_id")
                 quantity = item_data.get("quantity")
@@ -121,7 +179,6 @@ class OrderCreateView(APIView):
                     price=price
                 )
 
-            # Payment is automatically created via signal in order.models
             payment = Payment.objects.get(order=order)
 
             logger.info(f"Payment auto-created: {payment.id} for order {order.order_id}")
@@ -142,7 +199,7 @@ class OrderCreateView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Vehicle.DoesNotExist:
-            logger.error(f"Vehicle not found in items: {items}")
+            logger.error(f"Vehicle not found in items")
             return Response(
                 {"error": "Vehicle not found"},
                 status=status.HTTP_404_NOT_FOUND
@@ -155,20 +212,17 @@ class OrderCreateView(APIView):
             )
 
 
-
-
 class STKPushView(APIView):
     """
     Initiate M-Pesa STK push for an existing order.
     Requires: order_id and phone_number
     """
-    permission_classes = [AllowAny]  # TODO: Change to [IsAuthenticated] in production
+    permission_classes = [AllowAny] 
 
     @extend_schema(
         request=STKPushSerializer,
         responses={200: dict}
     )
-
     def post(self, request):
         """
         Initiate STK push payment.
@@ -199,6 +253,10 @@ class STKPushView(APIView):
 
         try:
             payment = Payment.objects.filter(order=order).order_by("-id").first()
+            
+            if not payment:
+                raise Payment.DoesNotExist
+
             payment.phone_number = phone_number
             payment.save(update_fields=["phone_number"])
             order.phone_number = phone_number
@@ -206,72 +264,56 @@ class STKPushView(APIView):
 
             logger.info(f"Initiating STK push for order {order_id} to {phone_number}")
 
-            # Call M-Pesa STK push
             callback_url = "https://spiro-ecommerce.onrender.com/api/payments/callback/"
 
-            try:
-                mpesa_response = stk_push(
-                    phone_number=phone_number,
-                    amount=order.total_amount,
-                    account_reference=str(order.order_id),
-                    transaction_desc="Spiro Bike Order",
-                    callback_url=callback_url,
-                    payment=payment
-                )
+            mpesa_response = stk_push(
+                phone_number=phone_number,
+                amount=order.total_amount,
+                account_reference=str(order.order_id),
+                transaction_desc="Spiro Bike Order",
+                callback_url=callback_url,
+                payment=payment
+            )
 
-                logger.info(f"M-Pesa response: {mpesa_response}")
+            logger.info(f"M-Pesa response: {mpesa_response}")
 
-                # Check for errors in response
-                if mpesa_response.get("ResponseCode") != "0":
-                    error_msg = mpesa_response.get("ResponseDescription", "M-Pesa error")
-                    logger.error(f"M-Pesa error: {error_msg}")
-                    payment.mark_as_failed(error_message=error_msg)
-                    return Response({
-                        "success": False,
-                        "error": error_msg
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-                # Extract M-Pesa response details
-                checkout_request_id = mpesa_response.get("CheckoutRequestID")
-                merchant_request_id = mpesa_response.get("MerchantRequestID")
-
-                if not checkout_request_id:
-                    error_msg = "No CheckoutRequestID from M-Pesa"
-                    logger.error(error_msg)
-                    return Response({
-                        "success": False,
-                        "error": error_msg
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-                # Update payment record
-                payment.mpesa_checkout_request_id = checkout_request_id
-                payment.merchant_request_id = merchant_request_id
-                payment.mark_as_waiting()  # Sets status to waiting_for_payment and timestamp
-
-                # Update order record
-                order.checkout_request_id = checkout_request_id
-                order.merchant_request_id = merchant_request_id
-                order.save(update_fields=["checkout_request_id", "merchant_request_id"])
-
-                logger.info(f"STK push sent successfully for order {order_id}")
-
-                return Response({
-                    "success": True,
-                    "message": "STK Push sent successfully",
-                    "order_id": str(order.order_id),
-                    "payment_id": payment.id,
-                    "mpesa_response": mpesa_response
-                }, status=status.HTTP_200_OK)
-
-            except Exception as e:
-                error_msg = f"M-Pesa API error: {str(e)}"
-                logger.error(error_msg)
-                payment.increment_retry()
+            if mpesa_response.get("ResponseCode") != "0":
+                error_msg = mpesa_response.get("ResponseDescription", "M-Pesa error")
+                logger.error(f"M-Pesa error: {error_msg}")
                 payment.mark_as_failed(error_message=error_msg)
                 return Response({
                     "success": False,
                     "error": error_msg
                 }, status=status.HTTP_400_BAD_REQUEST)
+
+            checkout_request_id = mpesa_response.get("CheckoutRequestID")
+            merchant_request_id = mpesa_response.get("MerchantRequestID")
+
+            if not checkout_request_id:
+                error_msg = "No CheckoutRequestID from M-Pesa"
+                logger.error(error_msg)
+                return Response({
+                    "success": False,
+                    "error": error_msg
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            payment.mpesa_checkout_request_id = checkout_request_id
+            payment.merchant_request_id = merchant_request_id
+            payment.mark_as_waiting()
+
+            order.checkout_request_id = checkout_request_id
+            order.merchant_request_id = merchant_request_id
+            order.save(update_fields=["checkout_request_id", "merchant_request_id"])
+
+            logger.info(f"STK push sent successfully for order {order_id}")
+
+            return Response({
+                "success": True,
+                "message": "STK Push sent successfully",
+                "order_id": str(order.order_id),
+                "payment_id": payment.id,
+                "mpesa_response": mpesa_response
+            }, status=status.HTTP_200_OK)
 
         except Payment.DoesNotExist:
             logger.error(f"Payment not found for order {order_id}")
@@ -280,19 +322,20 @@ class STKPushView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            logger.error(f"Unexpected error in STK push: {str(e)}")
+            logger.error(f"Error in STK push: {str(e)}")
+            if payment:
+                payment.increment_retry()
+                payment.mark_as_failed(error_message=str(e))
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
 
-
-
 class MpesaCallbackView(APIView):
     """
     Receive M-Pesa STK push callback.
-    No authentication required (M-Pesa servers call this).
+    No authentication required (M-Pesa servers call this endpoint).
     """
     authentication_classes = []
     permission_classes = []
@@ -301,14 +344,16 @@ class MpesaCallbackView(APIView):
         request=STKPushCallbackSerializer,
         responses={200: dict}
     )
-
     def post(self, request):
+        """
+        Process M-Pesa callback and update payment status.
+        Handles both Safaricom standard format and flattened format.
+        """
         logger.info(f"M-Pesa callback received: {request.data}")
 
         data = request.data
 
         try:
-            # CASE 1: Safaricom standard format
             if "Body" in data:
                 callback = data["Body"]["stkCallback"]
                 checkout_id = callback["CheckoutRequestID"]
@@ -321,7 +366,6 @@ class MpesaCallbackView(APIView):
                     if item.get("Name") == "MpesaReceiptNumber":
                         receipt_number = item.get("Value")
 
-            # CASE 2: Your flattened format (what you're receiving)
             else:
                 checkout_id = data.get("CheckoutRequestID")
                 result_code = data.get("ResultCode")
@@ -329,6 +373,7 @@ class MpesaCallbackView(APIView):
                 receipt_number = data.get("MpesaReceiptNumber")
 
             if not checkout_id:
+                logger.warning("Missing CheckoutRequestID in callback")
                 return Response(
                     {"error": "Missing CheckoutRequestID"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -341,13 +386,10 @@ class MpesaCallbackView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
-
         try:
-            payment = Payment.objects.get(
-                mpesa_checkout_request_id=checkout_id
-            )
+            payment = Payment.objects.get(mpesa_checkout_request_id=checkout_id)
         except Payment.DoesNotExist:
+            logger.error(f"Payment not found for checkout_id: {checkout_id}")
             return Response(
                 {"error": "Payment not found"},
                 status=status.HTTP_404_NOT_FOUND
@@ -357,24 +399,23 @@ class MpesaCallbackView(APIView):
 
         if str(result_code) == "0":
             payment.mark_as_paid(receipt_number=receipt_number)
-
             order.payment_status = "paid"
             order.order_status = "processing"
             order.mpesa_receipt_number = receipt_number
             order.paid_at = timezone.now()
             order.transaction_date = timezone.now()
-            order.save()
-
+            logger.info(f"Payment successful for order {order.order_id}")
         else:
             payment.mark_as_failed(error_message=result_desc)
-
             order.payment_status = "failed"
-            order.save()
+            logger.warning(f"Payment failed for order {order.order_id}: {result_desc}")
 
-        return Response({"ResultCode": 0, "ResultDesc": "We have received the callback"}, status=status.HTTP_200_OK)
+        order.save()
 
-
-
+        return Response(
+            {"ResultCode": 0, "ResultDesc": "We have received the callback"},
+            status=status.HTTP_200_OK
+        )
 
 class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.all()
@@ -409,118 +450,26 @@ class OrderItemViewSet(viewsets.ModelViewSet):
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
-class LoginView(TokenObtainPairView):
-    serializer_class = LoginSerializer
-
-
-# ============================================================================
-# DOCUMENTATION
-# ============================================================================
 
 def scalar_docs(request):
+    """
+    Serve API documentation with Scalar UI.
+    """
     html = """
     <!doctype html>
     <html>
     <head>
-      <title>API Docs</title>
+      <title>Spiro API Docs</title>
       <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
     </head>
     <body>
       <script
         id="api-reference"
         data-url="/api/schema/"
       ></script>
-
       <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
     </body>
     </html>
     """
     return HttpResponse(html)
-from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import LoginSerializer
-from django.contrib.auth import authenticate
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
-from user.models import User
-
-
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        request=LoginSerializer,
-        responses={200: dict}
-    )
-
-    def post(self, request):
-        email = request.data.get("email")
-        password = request.data.get("password")
-
-        if not email or not password:
-            return Response(
-                {"error": "Email and password are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-      
-        user = authenticate(request, username=email, password=password)
-
-        # fallback if backend doesn't map email properly
-        if user is None:
-            try:
-                user_obj = User.objects.get(email=email)
-            except User.DoesNotExist:
-                return Response(
-                    {"error": "Invalid email or password"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-
-            if not user_obj.check_password(password):
-                return Response(
-                    {"error": "Invalid email or password"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-
-            user = user_obj
-
-        if not user.is_active:
-            return Response(
-                {"error": "User account is disabled"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-       
-        refresh = RefreshToken.for_user(user)
-
-        return Response({
-            "access": str(refresh.access_token),
-            "refresh": str(refresh),
-            "user": {
-                "id": user.id,
-                "full_name": user.full_name,
-                "email": user.email,
-                "user_type": user.user_type,
-            }
-        })
-
-from rest_framework import generics
-from rest_framework.permissions import AllowAny
-from user.models import User
-from .serializers import RegisterSerializer
-
-
-class RegisterView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = RegisterSerializer
-    permission_classes = [AllowAny]
-
-def perform_create(self, serializer):
-    serializer.save(user=self.request.user)
