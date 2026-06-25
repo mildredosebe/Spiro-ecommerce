@@ -62,11 +62,9 @@ INSTALLED_APPS = [
     'order_item',
     'payment',
     'rest_framework.authtoken',
-    "corsheaders",
-    "drf_spectacular",
+    'corsheaders',
+    'drf_spectacular',
     'rest_framework_simplejwt',
-    
-   
 ]
 
 AUTH_USER_MODEL = "users.User"
@@ -74,6 +72,12 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ],
+}
 SPECTACULAR_SETTINGS = {
     "TITLE": "My API",
     "DESCRIPTION": "API Documentation",
