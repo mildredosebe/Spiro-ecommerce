@@ -91,14 +91,10 @@ class UserSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class CartSerializer(serializers.ModelSerializer):
-    """
-    Serializer for Cart model.
-    Represents a user's shopping cart.
-    """
     class Meta:
         model = Cart
         fields = '__all__'
-        read_only_fields = ('user')
+        read_only_fields = ('user',)
 
 
 class CartItemSerializer(serializers.ModelSerializer):

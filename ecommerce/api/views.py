@@ -32,7 +32,9 @@ from api.serializers import OrderItemSerializer
 from payment.models import Payment
 from api.serializers import PaymentSerializer, STKPushSerializer, STKPushCallbackSerializer
 from payment.service.mpesa import stk_push
-
+from rest_framework.viewsets import ModelViewSet
+from .models import Cart
+from .serializers import CartSerializer
 logger = logging.getLogger(__name__)
 
 
@@ -117,7 +119,7 @@ class OrderCreateView(APIView):
     Create a new order with items.
     A Payment record is automatically created via Django signal.
     """
-    permission_classes = [AllowAny]  # TODO: Change to [IsAuthenticated] in production
+    permission_classes = [IsAuthenticated]  # TODO: Change to [IsAuthenticated] in production
 
     def post(self, request):
         """
@@ -217,7 +219,7 @@ class STKPushView(APIView):
     Initiate M-Pesa STK push for an existing order.
     Requires: order_id and phone_number
     """
-    permission_classes = [AllowAny] 
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=STKPushSerializer,
@@ -426,11 +428,15 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
-
-class CartViewSet(viewsets.ModelViewSet):
-    queryset = Cart.objects.all()
+class CartViewSet(ModelViewSet):
     serializer_class = CartSerializer
+    permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        return Cart.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 class CartItemViewSet(viewsets.ModelViewSet):
     queryset = CartItem.objects.all()
